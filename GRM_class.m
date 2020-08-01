@@ -1,0 +1,192 @@
+classdef GRM_class
+    properties
+        numOfParameters
+        microArrayData 
+        qPCRData
+        initialParams
+        lb
+        ub
+        optimumParam
+        optimumlikelihood
+        TimeC
+       
+    end
+    
+    methods
+        
+        function obj=set.optimumParam(obj,val)
+            obj.optimumParam=val;
+        end
+        
+        function obj=set.TimeC(obj,val)
+            obj.TimeC=val;
+        end
+        function obj = GRM_class(varargin)
+       lb=  varargin{2};
+       ub= varargin{3};
+          if length(varargin)==7 
+               paramInd=varargin{6};
+               paramVal=varargin{7};
+               
+              for i=1:length(paramInd)
+                  lb(paramInd)=paramVal(i);
+                  ub(paramInd)=paramVal(i);
+                  
+              end
+               
+           end
+            obj.numOfParameters= varargin(1);
+            obj.lb=lb;
+            obj.ub=ub;
+            tmp=varargin(4);
+            obj.microArrayData=tmp{1};           
+            obj.TimeC=obj.microArrayData.GeneData(1).TimeCourse;
+            tmp=varargin(5);
+            obj.qPCRData= tmp{1}.qpcr;            
+            obj.initialParams=(lb+ub)/2;
+            
+            
+        end
+        
+        function ode=odefuncWithOutIron(obj,p)
+            
+            ode=@(t,x) [p(1)*(1-exp(-p(4)*t))+p(2)-p(3)*x(1); ...
+                p(5)-p(6)*x(2);...
+                p(7)*(1-exp(-p(4)*(t)))+p(8)-p(9)*x(3);...
+                p(10)*(1-exp(-p(4)*(t)))+p(11)-p(12)*x(4)];
+            
+        end
+        function ode=odefuncWithIron(obj,p)
+            ode=@(t,x) [p(2)-p(3)*x(1); ...
+                p(5)-p(6)*x(2);...
+                p(8)-p(9)*x(3);...
+                p(11)-p(12)*x(4)];
+            
+        end
+        
+        
+        function likelihood=objective_func(obj,param,qpcr)
+                        
+            
+            TC=obj.TimeC;
+            data1=TC(1,:);
+            data2=TC(2,:);
+            data3=TC(3,:);
+            data4=TC(4,:);
+            
+            p=param;
+            f=@(t,x) [p(1)*(1-exp(-p(4)*(t)))+p(2)-p(3)*x(1);...
+                p(5)-p(6)*x(2);...
+                p(7)*(1-exp(-p(4)*(t)))+p(8)-p(9)*x(3);...
+                p(10)*(1-exp(-p(4)*(t)))+p(11)-p(12)*x(4)];
+            
+            [t,xa] = ode45(f,(0:0.5:72),[1.8540  1.1369 0.9649 1.3398]);
+                        
+            ind =[1 3 6 12 24 48 72]/0.5 - 1;            
+            
+            likelihood= (data1-xa(ind,1)')* (data1-xa(ind,1)')' +  ...
+                (data2-xa(ind,2)')* (data2-xa(ind,2)')' + ...
+                (data3-xa(ind,3)')* (data3-xa(ind,3)')' + ...
+                (data4-xa(ind,4)')* (data4-xa(ind,4)')';
+            
+            f=@(t,x) [p(2)-p(3)*x(1); ...
+                p(5)-p(6)*x(2);...
+                p(8)-p(9)*x(3);...
+                p(11)-p(12)*x(4)];
+            
+            [t,xa] = ode45(f,(0:0.5:36),[1.8540  1.1369 0.9649 1.3398]);
+            
+                        
+            ind =[1 12 24 36]/0.5 - 1;
+            
+            likelihood=likelihood+ (qpcr(1,:)-xa(ind,1)')* (qpcr(1,:)-xa(ind,1)')' +  ...
+                (qpcr(2,:)-xa(ind,2)')* (qpcr(2,:)-xa(ind,2)')' + ...
+                (qpcr(3,:)-xa(ind,3)')* (qpcr(3,:)-xa(ind,3)')' + ...
+                (qpcr(4,:)-xa(ind,4)')* (qpcr(4,:)-xa(ind,4)')';
+                     
+        end
+        
+        
+        
+        function [params, L]=estimateParam(obj)
+            
+            
+            
+            [r,fval,~ ,~]=fmincon(@(param)obj.objective_func(param,obj.qPCRData),obj.initialParams,[],[],[],[],obj.lb,obj.ub);
+            params=r;
+            L=fval;            
+            obj.optimumParam=r;
+            obj.optimumlikelihood=L;
+        end
+        
+        function [geneExpression,tc] = simulate(obj,p)
+            
+            f=@(t,x) [p(1)*(1-exp(-p(4)*(t)))+p(2)-p(3)*x(1);...
+                p(5)-p(6)*x(2);...
+                p(7)*(1-exp(-p(4)*(t)))+p(8)-p(9)*x(3);...
+                p(10)*(1-exp(-p(4)*(t)))+p(11)-p(12)*x(4)];
+            
+            [t,xa] = ode45(f,(0:0.5:72),[1.8540 1.1369 0.9649 1.3398]);    %initial value for ode should be set intelligently %to do
+            
+            geneExpression=xa;
+            tc=t;
+            
+            
+        end
+        
+        
+        function [geneExpression,tc] = simulate2(obj,p)
+            f=@(t,x) [p(2)-p(3)*x(1); ...
+                p(5)-p(6)*x(2);...
+                p(8)-p(9)*x(3);...
+                p(11)-p(12)*x(4)];
+            
+            [t,xa] = ode45(f,(0:0.5:72),[1.8540 1.1369 0.9649 1.3398]);    %initial value for ode should be set intelligently %to do
+            ind =[1 3 6 12 24 48 72]/0.5 - 1;
+            geneExpression=xa;
+            tc=t;
+            
+            
+        end
+        
+        
+        function plotresults(obj,geneName)
+            geneNames={'COL4','ETF9','ASIL2','MYB55'};
+            ind=strncmp(geneNames,geneName,length(geneName));
+            num=find(ind>0);
+            fname=['mArray_',geneName,'_Plus_Fe.mat'];
+            load(fname);
+            timeCourseTable=obj.TimeC;
+            
+            figure;
+            
+            
+            sd=obj.microArrayData.GeneData.Standard_Deviation;
+            
+            
+            [result, tc]=obj.simulate(obj.optimumParam);
+            result_without_ironsignal=obj.simulate2(obj.optimumParam);
+            load qpcr_minus_Fe
+            
+            
+            h=errorbar([0 3 6 12 24 48 72],timeCourseTable(num,:),sd(num,:),'Marker','o','color','r','LineStyle','none');
+            
+            hold on;
+            plot(tc,result(:,num),'color','blue');
+            
+            plot(mArray(:,1),mArray(:,2),'x','color','black');
+            plot(tc,result_without_ironsignal(:,num),'color','green');
+            plot([0 12 24 36],qpcr_minus_Fe(num,:),'o','color','black');
+            legend('measurement in -Fe','prediction in -Fe ','PCR measurement in +Fe','Prediction in +Fe','PCR measurement -Fe')
+            xlabel('Time');
+            ylabel(geneName);
+            xlim([0 80]);
+            plt=Plot();
+            plt.LineStyle={'none','-','none','-','none'};
+            plt.BoxDim=[10 6];
+            
+            
+        end
+    end
+    
+end
